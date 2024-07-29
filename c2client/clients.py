@@ -151,7 +151,7 @@ class EC2Client(C2Client):
 class CWClient(C2Client):
 
     url_key = "AWS_CLOUDWATCH_URL"
-    client_name = "cloudwatch"
+    client_name = "cw"
 
     @staticmethod
     def convert_args_legacy(arguments):
