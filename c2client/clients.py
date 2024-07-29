@@ -1,6 +1,5 @@
 import argparse
 import json
-import re
 import ssl
 from abc import abstractmethod
 from functools import wraps
@@ -100,11 +99,9 @@ class C2Client(BaseClient):
             verify=verify,
         )
 
-    @classmethod
-    def is_conversion_needed(cls, argument_name: str) -> bool:
-        """Check whether type conversion is needed for argument."""
-
-        return True
+    @staticmethod
+    def convert_args_legacy(arguments):
+        return arguments
 
     @classmethod
     def make_request(cls, method: str, arguments: dict, verify: bool):
@@ -112,11 +109,11 @@ class C2Client(BaseClient):
         client = cls.get_client(verify)
 
         if arguments:
+            arguments = cls.convert_args_legacy(arguments)
             shape = client.meta.service_model.operation_model(method).input_shape
             arguments = convert_args(from_dot_notation(arguments), shape)
 
         result = getattr(client, inflection.underscore(method))(**arguments)
-
         result.pop("ResponseMetadata", None)
 
         # default=str is required for serializing Datetime objects
@@ -128,11 +125,43 @@ class EC2Client(C2Client):
     url_key = "EC2_URL"
     client_name = "ec2"
 
+    @staticmethod
+    def convert_args_legacy(arguments):
+        """"""
+
+        new_arguments = {}
+        filters = {}
+        for key, value in arguments.items():
+            new_key = key
+            if "Filter" in key and "Value" in key:
+                key = ".".join(key.split(".")[:3])
+
+                if key in filters:
+                    filters[key] += 1
+                else:
+                    filters[key] = 1
+
+                new_key = f"{key}s.{filters[key]}"
+
+            new_arguments[new_key] = value
+
+        return new_arguments
+
 
 class CWClient(C2Client):
 
     url_key = "AWS_CLOUDWATCH_URL"
     client_name = "cloudwatch"
+
+    @staticmethod
+    def convert_args_legacy(arguments):
+        """Convert args name like in AWS."""
+
+        new_arguments = {}
+        for key, value in arguments.items():
+            new_key = key.replace(".member.", ".")
+            new_arguments[new_key] = value
+        return new_arguments
 
 
 class CTClient(C2Client):
@@ -140,41 +169,11 @@ class CTClient(C2Client):
     url_key = "AWS_CLOUDTRAIL_URL"
     client_name = "cloudtrail"
 
-    @classmethod
-    def make_request(cls, method: str, arguments: dict, verify: bool):
-
-        client = cls.get_client(verify)
-
-        if "MaxResults" in arguments:
-            arguments["MaxResults"] = int(arguments["MaxResults"])
-        if "StartTime" in arguments:
-            arguments["StartTime"] = int(arguments["StartTime"])
-        if "EndTime" in arguments:
-            arguments["EndTime"] = int(arguments["EndTime"])
-
-        result = getattr(client, inflection.underscore(method))(**from_dot_notation(arguments))
-
-        result.pop("ResponseMetadata", None)
-
-        return json.dumps(result, indent=4, sort_keys=True)
-
 
 class ASClient(C2Client):
 
     url_key = "AUTO_SCALING_URL"
     client_name = "autoscaling"
-
-    @classmethod
-    def is_conversion_needed(cls, argument_name: str) -> bool:
-        """Check whether type conversion is needed for argument."""
-
-        patterns = (
-            r"Filters\.\d+\.Values\.\d+",
-        )
-        for pattern in patterns:
-            if re.fullmatch(pattern, argument_name):
-                return False
-        return True
 
 
 class BSClient(C2Client):
